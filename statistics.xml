@@ -47,4 +47,8 @@
             </fieldset>
         </fields>
     </config>
+
+    <updateservers>
+        <server type="extension" priority="1" name="Weltspiegel Statistics Plugin Updates">https://raw.githubusercontent.com/weltspiegel-cottbus/plg_system_statistics/main/update-manifest.xml</server>
+    </updateservers>
 </extension>

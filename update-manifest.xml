@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<updates>
+    <update>
+        <name>Weltspiegel Statistics System Plugin</name>
+        <description>System-Plugin, das die CSS-Messpunkte der Besucher-Statistik einbettet</description>
+        <element>statistics</element>
+        <type>plugin</type>
+        <folder>system</folder>
+        <client>site</client>
+        <version>1.0.0</version>
+        <infourl title="GitHub Repository">https://github.com/weltspiegel-cottbus/plg_system_statistics</infourl>
+        <downloads>
+            <downloadurl type="full" format="zip">https://github.com/weltspiegel-cottbus/plg_system_statistics/releases/download/v1.0.0/plg_system_statistics-1.0.0.zip</downloadurl>
+        </downloads>
+        <maintainer>Michael Buchholz</maintainer>
+        <maintainerurl>https://www.weltspiegel-cottbus.de</maintainerurl>
+        <targetplatform name="joomla" version="6\.[0-9]"/>
+        <php_minimum>8.1</php_minimum>
+    </update>
+</updates>
