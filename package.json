@@ -1,6 +1,6 @@
 {
   "name": "plg_system_statistics",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Weltspiegel system plugin - embeds the CSS measurement probes",
   "license": "MIT",
   "repository": {
