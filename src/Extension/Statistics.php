@@ -13,8 +13,12 @@ namespace Weltspiegel\Plugin\System\Statistics\Extension;
 
 use Joomla\CMS\Plugin\CMSPlugin;
 use Joomla\CMS\Uri\Uri;
+use Joomla\Event\Priority;
 use Joomla\Event\SubscriberInterface;
+use Weltspiegel\Component\Statistics\Administrator\Helper\CounterHelper;
 use Weltspiegel\Component\Statistics\Administrator\Helper\MetricRegistry;
+use Weltspiegel\Component\Statistics\Administrator\Helper\PageViewClassifier;
+use Weltspiegel\Component\Statistics\Administrator\Helper\PageViewRegistry;
 
 /**
  * Embeds the CSS measurement probes into every frontend page.
@@ -25,6 +29,9 @@ use Weltspiegel\Component\Statistics\Administrator\Helper\MetricRegistry;
  * matches its own display — so the server learns the bucket without ever reading
  * anything from the device. This is the same mechanism as a responsive image
  * chosen via srcset, and it needs neither JavaScript nor consent.
+ *
+ * Page views are counted separately, on the server, from what the browser sends
+ * with every page request anyway (see {@see countPageView()}).
  *
  * @since 1.0.0
  */
@@ -49,9 +56,130 @@ final class Statistics extends CMSPlugin implements SubscriberInterface
     public static function getSubscribedEvents(): array
     {
         return [
+            // Before the page cache (which answers from onAfterRoute at normal
+            // priority and ends the request there): a view served from the cache
+            // is a view too, and by plugin order alone this would be left to the
+            // backend's ordering.
+            'onAfterRoute'    => ['countPageView', Priority::HIGH],
             'onAfterDispatch' => 'injectProbeStyles',
             'onAfterRender'   => 'injectProbeMarkup',
         ];
+    }
+
+    /**
+     * Count the page view: which kind of page, from which kind of origin.
+     *
+     * Everything comes from headers the browser sends with every page request
+     * anyway — nothing is read from the device, nothing is stored on it, and
+     * there is no script and no cookie. The server only sorts the request into
+     * one of a few kinds and adds one to a daily counter; the referrer is never
+     * written down, only the kind it was sorted into. There is no visitor here,
+     * only page views: without an identifier no two of them can be tied together.
+     *
+     * Only what announces itself as a browser navigating to a page is counted
+     * (`Sec-Fetch-Dest: document` and `Sec-Fetch-Mode: navigate`). That leaves out
+     * crawlers, scripts, embeds and prefetches, which would otherwise outnumber
+     * the real visitors of a small site — and browsers that predate those
+     * headers, which is the price.
+     *
+     * @return  void
+     *
+     * @since 1.1.0
+     */
+    public function countPageView(): void
+    {
+        if (!$this->params->get('count_pageviews', 1)) {
+            return;
+        }
+
+        // An older component without the classifier must not take the site down.
+        if (!class_exists(PageViewClassifier::class)) {
+            return;
+        }
+
+        try {
+            $this->recordPageView();
+        } catch (\Throwable $e) {
+            // Never let a statistics failure surface on the site.
+        }
+    }
+
+    /**
+     * Classify the current request and record it, if it is a page view.
+     *
+     * @return  void
+     *
+     * @since 1.1.0
+     */
+    private function recordPageView(): void
+    {
+        $app = $this->getApplication();
+
+        if (!$app->isClient('site')) {
+            return;
+        }
+
+        $input  = $app->getInput();
+        $server = $input->server;
+
+        if ($server->getString('REQUEST_METHOD', '') !== 'GET') {
+            return;
+        }
+
+        if ($server->getString('HTTP_SEC_FETCH_DEST', '') !== 'document'
+            || $server->getString('HTTP_SEC_FETCH_MODE', '') !== 'navigate'
+        ) {
+            return;
+        }
+
+        // A page the browser fetches ahead of time is not a page anyone looked at.
+        foreach (['HTTP_SEC_PURPOSE', 'HTTP_PURPOSE'] as $header) {
+            if (preg_match('/prefetch|prerender/i', $server->getString($header, '')) === 1) {
+                return;
+            }
+        }
+
+        $option = $input->getCmd('option', '');
+
+        if ($option === 'com_statistics' || $input->getCmd('format', 'html') !== 'html') {
+            return;
+        }
+
+        if ($this->params->get('exclude_logged_in', 1) && $app->getIdentity() && !$app->getIdentity()->guest) {
+            return;
+        }
+
+        $referer = $server->getString('HTTP_REFERER', '');
+        $source  = PageViewClassifier::sourceOf($server->getString('HTTP_SEC_FETCH_SITE', ''), $referer);
+
+        if ($source === null) {
+            return;
+        }
+
+        $menu = $app->getMenu('site');
+        $type = PageViewClassifier::typeOfRequest($option, $input->getCmd('view', ''), $menu->getActive() ?: null);
+
+        CounterHelper::increment(PageViewRegistry::METRIC_ENTRY, PageViewRegistry::entryBucket($type, $source));
+
+        if ($source !== 'internal') {
+            return;
+        }
+
+        // A navigation within the site: which kind of page did it come from?
+        $from = PageViewRegistry::UNKNOWN;
+        $path = PageViewClassifier::ownPathOf($referer, Uri::getInstance()->getHost(), Uri::root(true));
+
+        if ($path !== null) {
+            $byRoute = [];
+
+            foreach ($menu->getMenu() as $item) {
+                $byRoute[strtolower((string) $item->route)] = $item;
+            }
+
+            $from = PageViewClassifier::typeOfPath($path, $byRoute);
+        }
+
+        CounterHelper::increment(PageViewRegistry::METRIC_FLOW, PageViewRegistry::flowBucket($from, $type));
     }
 
     /**
